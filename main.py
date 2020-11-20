@@ -1,6 +1,7 @@
 import argparse
 import tensorflow as tf
 import numpy as np
+import datetime
 from rouge_score import rouge_scorer
 
 tf.random.set_seed(1234)
@@ -88,6 +89,7 @@ def evaluate(hparams, model, tokenizer):
 
 
 def main(hparams):
+    print("Layers", hparams.num_layers)
     train_dataset, test_dataset, tokenizer = get_dataset(hparams)
     dataset = train_dataset
 
@@ -117,13 +119,14 @@ def main(hparams):
 
     model.fit(dataset, epochs=hparams.epochs)
 
-    # evaluate(hparams, model, tokenizer)
+    evaluate(hparams, model, tokenizer)
 
-
+"""
     ## Test Dataset Evaluation
 
     def test_inference(hparams, sent):
         output = tf.expand_dims(hparams.start_token, 0)
+        prob = tf.reshape(tf.cast(np.zeros(hparams.vocab_size), dtype=tf.float32), (1, hparams.vocab_size))
         # print(output)
         for i in range(hparams.max_length):
             predictions = model(inputs=[sent, output], training=False)
@@ -140,36 +143,84 @@ def main(hparams):
             # as its input.
             output = tf.concat([output, predicted_id], axis=-1)
 
-        return output
+
+        ## for sparse categorial
+        output2 = tf.expand_dims(hparams.start_token, 0)
+        for i in range(hparams.max_length):
+            predictions = model(inputs=[sent, output2], training=False)
+            # print(predictions)
+            # select the last word from the seq_len dimension
+            predictions = predictions[:, -1:, :]
+
+            predicted_id = tf.cast(tf.argmax(predictions, axis=-1), tf.int32)
+
+            if tf.equal(predicted_id, hparams.end_token[0]):
+                break
+            # concatenated the predicted_id to the output which is given to the decoder
+            # as its input.
+            output2 = tf.concat([output2, predicted_id], axis=-1)
+            pred = tf.squeeze(predictions, axis=0)
+
+            prob = tf.concat([prob, pred], axis=0)
+
+        return output, prob
 
 
     i = list(test_dataset.as_numpy_iterator())[0][0]
 
     j = list(test_dataset.as_numpy_iterator())[0][1]
 
-
+    # print(i,j)
     ## Getting y_pred for input given by i['input']
     y_pred = tf.reshape(tf.cast(np.zeros(41), dtype=tf.int32), (1, 41))
 
-    for sent in i['input']:
+    for ii in j:
+        for k in range(len(ii)):
+            if ii[k] == hparams.end_token:
+                ii[k] = 0
+
+    y_true = j
+
+    sparse_accu = []
+
+    for sent, true in zip(i['input'], y_true):
         # sent = tf.reshape(sent, [1, len(sent)])
         sent = tf.expand_dims(sent, axis=0)
-
-        pred = test_inference(hparams, sent)
+        true = testing.rem_zero(true)
+        pred, prob = test_inference(hparams, sent)
 
         # print(type(y_pred), type(pred))
         pred = tf.keras.preprocessing.sequence.pad_sequences(pred, maxlen=hparams.max_length + 1, padding='post')
         y_pred = tf.concat([y_pred, pred], axis=0)
 
+        #for sparse
+        prob = prob[1:]
+
+        if len(true) < len(prob):
+            for i in range(len(prob) - len(true)):
+                true.append(0)
+
+        if len(prob) < len(true):
+            for i in range(len(true) - len(prob)):
+                prob_init = tf.reshape(tf.cast(np.zeros(hparams.vocab_size), dtype=tf.float32), (1, hparams.vocab_size))
+                prob = tf.concat([prob, prob_init], axis=0)
+
+        true = tf.cast(true, dtype=tf.float32)
+
+        # print(true, prob)
+
+        m = tf.keras.metrics.sparse_categorical_accuracy(true, prob)
+        m = m.numpy()
+        # print(m)
+        accu = (m == 1).sum() / len(m)
+        sparse_accu.append(accu)
+
+
+    #
     y_pred = y_pred[1:, 1:-1]
     y_pred = y_pred.numpy()
 
-    for i in j:
-        for k in range(len(i)):
-            if i[k] == hparams.end_token:
-                i[k] = 0
 
-    y_true = j
 
     ## Simple Accuracy and Sparse Categorial accuracy
 
@@ -179,21 +230,25 @@ def main(hparams):
         accu = testing.test_accuracy(i, j)
         accuracy_vector.append(accu)
 
-    print("accuracy: ", sum(accuracy_vector)/len(accuracy_vector))
+
 
     ## Rouge Score
     scores, rouge1_precision, rouge1_recall, rouge1_f, rouge2_precision, rouge2_recall, rouge2_f,rougeL_precision, rougeL_recall, rougeL_f = testing.rouge_evauation(y_true, y_pred, tokenizer)
 
-    print(accuracy_vector, '\n',
-          rouge1_precision, '\n',
-          rouge1_recall, '\n',
-          rouge1_f, '\n',
-          rouge2_precision, '\n',
-          rouge2_recall, '\n',
-          rouge2_f,'\n',
-          rougeL_precision, '\n',
-          rougeL_recall, '\n',
-          rougeL_f, '\n',)
+    print("accuracy = ", accuracy_vector, '\n',
+          "rouge1_precision = ",rouge1_precision, '\n',
+          "rouge1_recall = ", rouge1_recall, '\n',
+          "rouge1_f = ",rouge1_f, '\n',
+          "rouge2_precision = ",rouge2_precision, '\n',
+          "rouge2_recall = ", rouge2_recall, '\n',
+          "rouge2_f = ", rouge2_f,'\n',
+          "rougeL_precision = ", rougeL_precision, '\n',
+          "rougeL_recall = ",rougeL_recall, '\n',
+          "rougeL_f = ", rougeL_f, '\n',
+          "sparse Vector ", sparse_accu)
+
+    print("accuracy: ", sum(accuracy_vector) / len(accuracy_vector))
+
     print("Rouge1 Precision: ", sum(rouge1_precision)/len(rouge1_precision))
     print("Rouge1 Recall: ", sum(rouge1_recall) / len(rouge1_recall))
     print("Rouge1 FMeasure: ", sum(rouge1_f) / len(rouge1_f))
@@ -207,6 +262,10 @@ def main(hparams):
     print("RougeL FMeasure: ", sum(rougeL_f) / len(rougeL_f))
 
 
+    print("Sparse Accuracy", sum(sparse_accu) / len(sparse_accu))
+
+    print(datetime.datetime.now())
+"""
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

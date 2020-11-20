@@ -125,7 +125,7 @@ def get_dataset(hparams):
       'dec_inputs': train_answers[:, :-1]
   }, train_answers[:, 1:]))
   train_dataset = train_dataset.cache()
-  train_dataset = train_dataset.shuffle(len(train_questions))
+  # train_dataset = train_dataset.shuffle(len(train_questions))
   train_dataset = train_dataset.batch(hparams.batch_size)
   train_dataset = train_dataset.prefetch(tf.data.experimental.AUTOTUNE)
 
@@ -135,7 +135,7 @@ def get_dataset(hparams):
       'dec_inputs': test_answers[:, :-1]
   }, test_answers[:, 1:]))
   test_dataset = test_dataset.cache()
-  test_dataset = test_dataset.shuffle(len(test_questions))
+  # test_dataset = test_dataset.shuffle(len(test_questions))
   test_dataset = test_dataset.batch(len(test_questions))
   # test_dataset = test_dataset.prefetch(tf.data.experimental.AUTOTUNE)
 
